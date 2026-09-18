@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Airflow runtime state (mounted into containers, not source)
+airflow-logs/
+logs/
+*.log
+standalone_admin_password.txt
+
+# Docker Compose named volumes if ever bind-mounted locally
+postgres-db-volume/
+localstack-data/
+trino-data/
+
+# LocalStack local state
+.localstack/
+
+# Environment / secrets
+.env
+.env.*
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Claude Code local settings
+.claude/settings.local.json
