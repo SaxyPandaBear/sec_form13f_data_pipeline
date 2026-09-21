@@ -842,6 +842,16 @@ def sec_13f_pipeline():
         across security types; `total_shares` is still carried, summed only
         over SH-type rows, for reference.
 
+        `total_value_pct_change` / `total_shares_pct_change` compare each
+        (cik, cusip) row to that same holder+security's own previous row in
+        the table, ordered by `periodofreport` — i.e. the previous period
+        they reported this cusip at all, not necessarily the immediately
+        preceding calendar quarter. Both are null for a holder+security's
+        first period (no prior row to compare) and when the prior period's
+        value was exactly 0 (a real case for `total_shares`, which is 0 by
+        design for bond-only positions — see above; dividing by that zero
+        is left undefined rather than reported as -100%).
+
         Does not attempt to split positions reported under shared
         investment discretion across `othermanager2`, and the ~0.0007% of
         cover pages with `isamendment='Y'` but a null `amendmenttype` (a
@@ -941,6 +951,35 @@ def sec_13f_pipeline():
             ranked = positions.withColumn(
                 "rank",
                 F.rank().over(Window.partitionBy("cusip", "periodofreport").orderBy(F.col("total_value").desc())),
+            )
+
+            # Change vs. this same holder+security's own previous reporting period, not vs.
+            # the calendar-prior quarter — if a holder skipped a quarter for this cusip, "prior"
+            # here means the last period they *did* report it. prior_total_value/shares are null
+            # for a holder+security's first-ever period, which makes both pct-change columns null
+            # too (arithmetic on a null operand is null) without needing an explicit check. A
+            # zero prior value is checked explicitly: total_shares is deliberately summed as 0 for
+            # non-SH securities (see docstring above), so "prior period was 0" is a real case, not
+            # just a hypothetical one, and dividing by it must not be treated as -100%/undefined.
+            holder_security = Window.partitionBy("cik", "cusip").orderBy("periodofreport")
+            ranked = (
+                ranked.withColumn("prior_total_value", F.lag("total_value").over(holder_security))
+                .withColumn("prior_total_shares", F.lag("total_shares").over(holder_security))
+                .withColumn(
+                    "total_value_pct_change",
+                    F.when(F.col("prior_total_value") == 0, F.lit(None))
+                    .otherwise(
+                        (F.col("total_value") - F.col("prior_total_value")) / F.col("prior_total_value") * 100
+                    ),
+                )
+                .withColumn(
+                    "total_shares_pct_change",
+                    F.when(F.col("prior_total_shares") == 0, F.lit(None))
+                    .otherwise(
+                        (F.col("total_shares") - F.col("prior_total_shares")) / F.col("prior_total_shares") * 100
+                    ),
+                )
+                .drop("prior_total_value", "prior_total_shares")
             )
 
             table_columns = [(field.name, _glue_column_type(field.dataType)) for field in ranked.schema.fields]

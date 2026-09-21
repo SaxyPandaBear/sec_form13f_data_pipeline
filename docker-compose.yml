@@ -101,6 +101,34 @@ services:
       localstack:
         condition: service_healthy
 
+  gold-api:
+    build:
+      context: ./ui/api
+    environment:
+      TRINO_HOST: trino
+      TRINO_PORT: "8080"
+      TRINO_CATALOG: gold
+      TRINO_SCHEMA: sec13f_gold
+      TRINO_USER: gold_ui
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    depends_on:
+      trino:
+        condition: service_healthy
+
+  gold-ui:
+    build:
+      context: ./ui/web
+    ports:
+      - "3000:3000"
+    depends_on:
+      - gold-api
+
 volumes:
   postgres-db-volume:
   localstack-data:

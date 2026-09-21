@@ -301,6 +301,46 @@ assumed — in a visible batch-of-4 pattern: four started within the same second
 subsequent download only started once an earlier one freed a slot, rather than all nine racing to
 start at once like before.
 
+## The gold-api/gold-ui UI
+
+Three choices worth recording, none of them forced by the tooling:
+
+**A FastAPI layer between the browser and Trino, rather than the browser querying Trino
+directly.** Trino's HTTP protocol is stateful (a query returns a `nextUri` to poll) and its client
+libraries assume a server-side caller — there's no supported browser-JS client, and even if there
+were, shipping Trino's connection details (and an open, unauthenticated query endpoint) straight
+to the browser is a different trust boundary than a same-origin JSON API with four fixed,
+parameter-validated routes. `gold-api` is that boundary: it's the only new thing that talks to
+Trino, and it exposes exactly the four queries the UI needs, nothing ad hoc.
+
+**Every value that reaches SQL is a bound parameter, not a string-interpolated one** —
+`cursor.execute(sql, params)` with `?` placeholders. Confirmed directly against the installed
+client (`trino==0.328.0`, `trino.dbapi.paramstyle == "qmark"`) by running a real parameterized
+query against the live `gold` catalog, rather than assumed: it initially failed with
+`Cannot apply operator: date = varchar(10)` when a `periodofreport` filter was bound as a plain
+ISO string, and succeeded once bound as an actual `datetime.date` — worth remembering if a future
+route filters on another date/timestamp column. `cik` and `cusip` are still regex-validated
+(`CIK_RE`/`CUSIP_RE` in `ui/api/main.py`) before use, but only for a clean 400 instead of a Trino
+type error, not as the injection defense — the bound parameter is what actually prevents that.
+The one hand-escaped value is the LIKE search term (`_like_term`), and that escaping is for a
+different reason: LIKE's own `%`/`_` wildcards inside a *bound* value still mean "match anything"
+to LIKE, so a literal search for `50%` needed its `%` escaped to search for that literal text
+rather than becoming a wildcard — bound parameters stop SQL injection, not LIKE-wildcard
+injection, and the two needed separate fixes.
+
+**`gold-ui`'s container runs `vite preview`, not a build copied into nginx.** This is a
+single-page, low-traffic local dev tool — `vite preview` already serves the production `dist/`
+build correctly over plain HTTP, and adding an nginx stage would just be another image and another
+config file to keep in sync for no behavioral difference at this scale. Revisit if the UI ever
+needs to run somewhere that isn't a docker-compose dev stack.
+
+One non-choice worth being explicit about: `VITE_API_BASE_URL` (`ui/web/.env`) is baked in at
+*build* time as `http://localhost:8000`, not read at container runtime — Vite only inlines
+`import.meta.env.VITE_*` values during `vite build`, and more fundamentally, the code reading that
+value runs in the user's browser, outside the compose network entirely, so it was never going to
+be able to resolve `gold-api` (the compose service name) even if the value were runtime-configurable.
+The host-published port is the only address that's ever reachable from there.
+
 ## Implementation notes
 
 - **SEC User-Agent policy**: SEC.gov requires a descriptive `User-Agent` header with contact info

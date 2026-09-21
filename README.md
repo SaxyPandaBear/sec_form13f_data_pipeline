@@ -45,6 +45,37 @@ GOLD
                           done
 ```
 
+Same flow, as Mermaid:
+
+```mermaid
+flowchart TD
+    A["discover_zip_files\nscrape SEC index page for .zip links"] --> B
+
+    subgraph BRONZE["BRONZE"]
+        B["download_zip_to_bronze\n(mapped, one task per zip; capped at\n4 concurrent downloads)"] --> B1[("bronze/form13f/&lt;period&gt;/*.zip")]
+    end
+
+    subgraph DQ["BRONZE DATA QUALITY"]
+        B1 --> C["check_bronze_quality_&lt;table&gt;\n(one task per canonical file, x7;\nvalidates rows against SILVER_SCHEMAS)"]
+        C -- failing rows --> C1[("bronze/dq_failed/sec13f_dq/&lt;table&gt;\nquarantine, all-string")]
+    end
+
+    subgraph SILVER["SILVER"]
+        C --> D["build_silver_&lt;table&gt;\n(one task per canonical file, x7;\nPySpark merge across periods)"]
+        D --> D1[("silver/form13f/sec13f/&lt;table&gt;\nIceberg + Glue staging")]
+    end
+
+    subgraph GOLD["GOLD"]
+        D1 -- infotable, coverpage, submission --> E["build_gold_holder_positions\n(join, dedupe amendments, rank)"]
+        E --> E1[("gold/form13f/sec13f_gold/holder_positions\nIceberg + Glue")]
+    end
+
+    subgraph CONSUMERS["consumers (outside the DAG)"]
+        E1 --> F["Trino\n(gold / silver / bronze_dq catalogs)"]
+        E1 --> G["gold-api -> gold-ui\n(React UI)"]
+    end
+```
+
 | Stage | Component | Notes |
 |---|---|---|
 | Orchestration | Apache Airflow (LocalExecutor) | `dags/sec_13f_pipeline.py` |
@@ -53,6 +84,7 @@ GOLD
 | Bronze data quality | One task per canonical file, statically named, between bronze and silver | `check_bronze_quality_submission`, `check_bronze_quality_infotable`, etc.; re-extracts its file from every bronze zip and validates each row against the explicit `SILVER_SCHEMAS` type contract, quarantining only the rows that fail into a mirrored, all-string Iceberg table for review — see "Bronze data-quality quarantine tables" below |
 | Silver | One task per canonical file, statically named | `build_silver_submission`, `build_silver_infotable`, etc. (`CANONICAL_FILES` in the DAG); each extracts its file from every bronze zip, merges across periods with a local PySpark session, writes the result as an **Apache Iceberg table** (Parquet data + Avro/JSON Iceberg metadata) directly to S3, and registers it as a Glue staging table |
 | Gold | Single task, downstream of `build_silver_{infotable,coverpage,submission}` | `build_gold_holder_positions`; reads three silver tables (not bronze), resolves the true reporting quarter, deduplicates 13F amendments, aggregates duplicate position lines, and ranks — see "Gold table: holder_positions" below |
+| Gold UI | `gold-api` + `gold-ui` services (not part of the DAG) | A small read-only React app for browsing `holder_positions` without writing SQL — see "Gold UI" below |
 
 ## Silver table schemas
 
@@ -191,6 +223,8 @@ IMPLEMENTATION.md; this is just the resulting schema.
 | `lot_count` | bigint | How many raw `infotable` rows were summed into this one — a real filing was found with 138 separate lines for a single CUSIP |
 | `source_accession_numbers` | string | Comma-joined accession number(s) this row's data came from, after amendment resolution — traceability back to the exact filing(s) |
 | `rank` | int | `RANK() OVER (PARTITION BY cusip, periodofreport ORDER BY total_value DESC)` — ties share a rank |
+| `total_value_pct_change` | double | % change in `total_value` vs. this same (`cik`, `cusip`)'s previous row, ordered by `periodofreport` — the previous period *they reported this cusip*, not necessarily the prior calendar quarter. Null for that pair's first period, and when the prior period's value was 0 |
+| `total_shares_pct_change` | double | Same, for `total_shares`. Null-on-zero-prior matters more here: `total_shares` is legitimately 0 for bond-only (non-SH) positions |
 
 Partitioned by `periodofreport`. Registered in Glue database `sec13f_gold` (own Iceberg catalog
 namespace `sec13f_gold`, S3 prefix `gold/form13f`) — separate from silver's catalog/database, same
@@ -270,6 +304,35 @@ Or non-interactively: `docker compose exec trino trino --server http://localhost
 Web UI at `http://localhost:8081` (Trino's own default port, 8080, is remapped on the host side —
 `airflow-webserver` already occupies 8080).
 
+## Gold UI
+
+A lightweight React app for browsing `holder_positions` without writing SQL — pick a reporting
+quarter, search a security by name or CUSIP, see its top holders (bar chart + table, including the
+`total_value_pct_change`/`total_shares_pct_change` columns), then click a holder to see their
+position in that security over time (line chart). Two services, both new, neither part of the DAG:
+
+| Service | What it is | Port |
+|---|---|---|
+| `gold-api` | FastAPI (`ui/api/main.py`), read-only, queries Trino's `gold` catalog | `8000` |
+| `gold-ui` | React + Vite (`ui/web/`), calls `gold-api` from the browser | `3000` |
+
+`gold-api` is the only new thing talking to Trino — it never touches S3, Postgres/JdbcCatalog, or
+Glue directly, same separation of concerns as a human running `trino` CLI queries. Every value
+that reaches a SQL string is validated first (an ISO date, digits, or an alphanumeric CUSIP) or
+quote-escaped (free-text search), rather than passed through the Trino client's own parameter
+binding — see `ui/api/main.py`'s module docstring for why.
+
+`gold-ui` is a production build served by `vite preview` inside its container (simplest thing that
+serves static files correctly; no nginx layer for a single-page local dev tool). It's built with a
+baked-in `VITE_API_BASE_URL=http://localhost:8000` (`ui/web/.env`, checked in — not a secret, just
+the host-published port the *browser* needs, which is not the same as the `gold-api` service name
+the browser can't resolve). If you remap `gold-api`'s host port, rebuild `gold-ui` with a matching
+`VITE_API_BASE_URL`.
+
+Until `build_gold_holder_positions` has run at least once, `gold-api`'s `/api/periods` returns an
+empty list and the UI says so rather than erroring — the gold table not existing yet is an expected
+state, not a bug.
+
 ## Running it
 
 ```bash
@@ -280,6 +343,8 @@ docker compose up -d
 # Airflow UI:  http://localhost:8080  (admin/admin)
 # Trino UI:    http://localhost:8081
 # LocalStack:  http://localhost:4566
+# Gold UI:     http://localhost:3000  (needs build_gold_holder_positions to have run at least once)
+# Gold API:    http://localhost:8000
 ```
 
 Trigger `sec_13f_pipeline` from the Airflow UI (or
@@ -333,4 +398,6 @@ trino/node.properties           # Trino node identity
 trino/jvm.config                # Trino JVM options
 trino/config.properties         # Trino coordinator config (single-node)
 trino/catalog/{gold,silver,bronze_dq}.properties  # one Trino catalog per Iceberg catalog the DAG writes
+ui/api/main.py                  # gold-api: FastAPI, read-only, queries Trino's gold catalog
+ui/web/                         # gold-ui: React + Vite app, top holders + position-history charts
 ```

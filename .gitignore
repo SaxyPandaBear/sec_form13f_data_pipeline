@@ -22,6 +22,13 @@ trino-data/
 # Environment / secrets
 .env
 .env.*
+# Not a secret: the UI's build-time default API URL, meant to be checked in
+# (see ui/web/.env's own comment).
+!ui/web/.env
+
+# Node (ui/web)
+node_modules/
+dist/
 
 # Editor / OS
 .DS_Store
