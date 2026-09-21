@@ -1,5 +1,5 @@
 import type { HolderHistoryPoint } from "../types";
-import { formatPctChange, formatPeriod, formatShares, formatValueThousands, pctChangeClass } from "../format";
+import { formatPctChange, formatQuarter, formatShares, formatValueThousands, pctChangeClass } from "../format";
 
 interface Props {
   points: HolderHistoryPoint[];
@@ -22,7 +22,7 @@ export default function HistoryTable({ points }: Props) {
       <tbody>
         {[...points].reverse().map((point) => (
           <tr key={point.periodofreport}>
-            <td>{formatPeriod(point.periodofreport)}</td>
+            <td>{formatQuarter(point.periodofreport)}</td>
             <td className="num">{formatValueThousands(point.total_value)}</td>
             <td className={`num ${pctChangeClass(point.total_value_pct_change)}`}>
               {formatPctChange(point.total_value_pct_change)}

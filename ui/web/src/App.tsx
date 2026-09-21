@@ -4,7 +4,7 @@ import type { HolderHistoryPoint, TopPositionRow } from "./types";
 import PositionsTable from "./components/PositionsTable";
 import HistoryTable from "./components/HistoryTable";
 import TrendChart from "./components/TrendChart";
-import { formatPeriod } from "./format";
+import { formatQuarter } from "./format";
 
 export default function App() {
   const [periods, setPeriods] = useState<string[]>([]);
@@ -72,7 +72,7 @@ export default function App() {
               <select id="period-select" value={period ?? ""} onChange={(e) => setPeriod(e.target.value)}>
                 {periods.map((p) => (
                   <option key={p} value={p}>
-                    {formatPeriod(p)}
+                    {formatQuarter(p)}
                   </option>
                 ))}
               </select>
@@ -80,7 +80,7 @@ export default function App() {
           </div>
 
           <div className="card">
-            <h2>Largest positions — {period ? formatPeriod(period) : ""}</h2>
+            <h2>Largest positions — {period ? formatQuarter(period) : ""}</h2>
             <p className="card-subtitle">Ranked by total reported value · click a row for its history</p>
             <PositionsTable rows={positions} onSelect={openDetail} />
           </div>
@@ -90,7 +90,7 @@ export default function App() {
       {selected && (
         <>
           <button className="back-link" onClick={backToTable}>
-            ← Back to {period ? formatPeriod(period) : "quarter"} positions
+            ← Back to {period ? formatQuarter(period) : "quarter"} positions
           </button>
 
           <div className="card">

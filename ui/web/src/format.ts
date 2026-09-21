@@ -27,13 +27,12 @@ export function pctChangeClass(pct: number | null): string {
   return pct > 0 ? "delta-up" : "delta-down";
 }
 
-export function formatPeriod(iso: string): string {
-  return new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    timeZone: "UTC",
-  });
+// periodofreport is always a quarter-end date (SEC's own convention), so it reads better
+// as the quarter it closes out ("Q2 2026") than as that literal date ("Jun 30, 2026").
+export function formatQuarter(iso: string): string {
+  const date = new Date(`${iso}T00:00:00Z`);
+  const quarter = Math.floor(date.getUTCMonth() / 3) + 1;
+  return `Q${quarter} ${date.getUTCFullYear()}`;
 }
 
 // Rounds up to a "nice" axis max (1/2/5 x 10^n) so gridline ticks land on clean numbers.

@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import type { HolderHistoryPoint } from "../types";
-import { formatPctChange, formatPeriod, formatValueThousands, niceCeil, pctChangeClass } from "../format";
+import { formatPctChange, formatQuarter, formatValueThousands, niceCeil, pctChangeClass } from "../format";
 
 interface Props {
   points: HolderHistoryPoint[];
@@ -95,7 +95,7 @@ export default function TrendChart({ points }: Props) {
                 textAnchor="middle"
                 className="axis-text"
               >
-                {formatPeriod(p.periodofreport)}
+                {formatQuarter(p.periodofreport)}
               </text>
             ) : null
           )}
@@ -144,10 +144,10 @@ export default function TrendChart({ points }: Props) {
             top: 4,
           }}
         >
-          <div className="tt-label">{formatPeriod(hovered.periodofreport)}</div>
+          <div className="tt-label">{formatQuarter(hovered.periodofreport)}</div>
           <div className="tt-value">{formatValueThousands(hovered.total_value)}</div>
           <div className={pctChangeClass(hovered.total_value_pct_change)}>
-            {formatPctChange(hovered.total_value_pct_change)} vs. prior period
+            {formatPctChange(hovered.total_value_pct_change)} vs. prior quarter
           </div>
         </div>
       )}
