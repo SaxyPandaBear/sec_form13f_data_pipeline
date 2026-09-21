@@ -28,11 +28,14 @@ export function pctChangeClass(pct: number | null): string {
 }
 
 // periodofreport is always a quarter-end date (SEC's own convention), so it reads better
-// as the quarter it closes out ("Q2 2026") than as that literal date ("Jun 30, 2026").
+// as the quarter it closes out ("2026 Q2") than as that literal date ("Jun 30, 2026").
+// Year-first so the dropdown's option order (source order, ascending/descending by date)
+// matches plain string/alphanumeric sort too - "2026 Q2" < "2026 Q3", but "Q2 2026" and
+// "Q3 2019" would sort by quarter digit first and scramble the years.
 export function formatQuarter(iso: string): string {
   const date = new Date(`${iso}T00:00:00Z`);
   const quarter = Math.floor(date.getUTCMonth() / 3) + 1;
-  return `Q${quarter} ${date.getUTCFullYear()}`;
+  return `${date.getUTCFullYear()} Q${quarter}`;
 }
 
 // Rounds up to a "nice" axis max (1/2/5 x 10^n) so gridline ticks land on clean numbers.
